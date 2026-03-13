@@ -1,0 +1,226 @@
+﻿using Microsoft.Playwright;
+using System;
+using System.Threading.Tasks;
+
+Console.WriteLine("Selecciona una opción:");
+Console.WriteLine("1. Buscar C# en Wikipedia y tomar captura");
+Console.WriteLine("2. Ir a SauceDemo (Tienda de pruebas) y añadir algo al carrito (Lento)");
+Console.WriteLine("3. Ir a Decathlon y añadir varios productos al carrito (Lento)");
+Console.WriteLine("4. Ir a Decathlon y añadir producto al carrito (Rápido/Headless)");
+string opcion = Console.ReadLine() ?? "1";
+
+// 1. Inicializamos Playwright
+using var playwright = await Playwright.CreateAsync();
+
+// 2. Lanzamos el navegador
+// Usamos SlowMo activado si elegimos la opción 2 o 3, lo cual ralentiza las acciones
+await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+{
+    Headless = opcion == "4", // Si es la 4, abrimos en modo fantasma para máxima velocidad
+    SlowMo = (opcion == "2" || opcion == "3") ? 1000 : 0,
+    Args = new[] { "--start-maximized" } // Abre el navegador maximizado para que se vea bien
+});
+
+// Desactivamos el Viewport fijo de Playwright para que la página se adapte al tamaño real del navegador maximizado y no se vea con zoom
+var page = await browser.NewPageAsync(new BrowserNewPageOptions
+{
+    ViewportSize = ViewportSize.NoViewport
+});
+
+if (opcion == "1")
+{
+    // 3. Vamos a la página principal de Wikipedia
+    Console.WriteLine("Navegando a Wikipedia...");
+    await page.GotoAsync("https://es.wikipedia.org/");
+
+    // 4. Buscamos el cuadro de búsqueda e ingresamos "C#"
+    // El selector 'input[name="search"]' es el estándar de Wikipedia
+    await page.FillAsync("input[name=\"search\"]", "C Sharp");
+
+    // 5. Presionamos Enter para buscar
+    await page.Keyboard.PressAsync("Enter");
+
+    // 6. Esperamos a que el contenido principal de la página de C# esté visible
+    await page.WaitForSelectorAsync("#firstHeading");
+
+    Console.WriteLine($"Página cargada: {await page.TitleAsync()}");
+
+    // 7. Tomamos la captura de pantalla
+    string rutaCaptura = "captura_csharp.png";
+    await page.ScreenshotAsync(new PageScreenshotOptions
+    {
+        Path = rutaCaptura,
+        FullPage = true // Captura toda la página, no solo lo que se ve
+    });
+
+    Console.WriteLine($"Captura guardada como: {rutaCaptura}");
+}
+else if (opcion == "2")
+{
+    // Vamos a una página de pruebas de e-commerce que siempre funciona y es perfecta para bots.
+    Console.WriteLine("Navegando a SauceDemo (Tienda de pruebas)...");
+    await page.GotoAsync("https://www.saucedemo.com/");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Iniciando sesión...");
+    await page.FillAsync("#user-name", "standard_user");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.FillAsync("#password", "secret_sauce");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.ClickAsync("#login-button");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Añadiendo el primer producto al carrito...");
+    // Extraemos el nombre para el Excel
+    string nombreProdSauce = "Producto Desconocido";
+    try { nombreProdSauce = await page.Locator(".inventory_item_name").First.InnerTextAsync(); } catch {}
+
+    // El botón genérico ".btn_inventory" añade un producto al carrito
+    await page.Locator(".btn_inventory").First.ClickAsync();
+
+    Console.WriteLine($"¡Producto '{nombreProdSauce}' añadido al carrito!");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Yendo al carrito para comprobarlo...");
+    await page.ClickAsync(".shopping_cart_link");
+    await page.WaitForTimeoutAsync(3000); // Mostramos el resultado en pantalla un rato
+
+    // Guardar compra en Excel (CSV)
+    string escritorio = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+    string rutaCsv = System.IO.Path.Combine(escritorio, "compras_exitosas.csv");
+    if (!System.IO.File.Exists(rutaCsv)) System.IO.File.AppendAllText(rutaCsv, "Fecha;Tienda;Producto\n");
+    System.IO.File.AppendAllText(rutaCsv, $"{DateTime.Now:dd/MM/yyyy HH:mm:ss};SauceDemo;{nombreProdSauce}\n");
+    Console.WriteLine($"\n[Excel] Compra guardada con éxito en el Escritorio: {rutaCsv}");
+}
+else if (opcion == "3" || opcion == "4")
+{
+    bool esRapido = opcion == "4";
+    int esperaPaso = esRapido ? 100 : 2000;
+    int esperaLarga = esRapido ? 500 : 3000;
+
+    Console.WriteLine(esRapido ? "Navegando a Decathlon muy rápido..." : "Navegando a Decathlon...");
+    await page.GotoAsync("https://www.decathlon.es/es/");
+    await page.WaitForTimeoutAsync(esperaPaso);
+
+    Console.WriteLine("Aceptando cookies de Decathlon...");
+    try
+    {
+        var btnCookies = page.Locator("#didomi-notice-agree-button, button:has-text('Aceptar y cerrar'), button:has-text('Aceptar todas')").First;
+        if (await btnCookies.IsVisibleAsync()) await btnCookies.ClickAsync();
+    }
+    catch { }
+    await page.WaitForTimeoutAsync(esperaPaso);
+
+    string[] productosABuscar = { "botas montaña" }; 
+    if (!esRapido) productosABuscar = new string[] { "mochila senderismo", "cantimplora" }; // En lento demostramos 2 productos, en rápido 1
+
+    var productosAñadidos = new System.Collections.Generic.List<string>();
+
+    foreach (var busqueda in productosABuscar)
+    {
+        Console.WriteLine($"\n--- Buscando: {busqueda} ---");
+
+        // Click en el botón de buscar lupa de móvil si existe
+        try {
+            var btnLupaMobile = page.Locator("button.button-search, button[aria-label='Buscar']:visible, .header-search-icon").First;
+            if (await btnLupaMobile.IsVisibleAsync()) await btnLupaMobile.ClickAsync();
+        } catch { }
+
+        // Múltiples selectores de búsqueda para cubrir diferentes resoluciones y cambios en la web
+        var searchInput = page.Locator("input[type='search'], input#search-suggestions-input, #search-block-input, input[name='query'], input[placeholder*='Buscar']").First;
+
+        await searchInput.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 10000 });
+        await searchInput.FillAsync(busqueda);
+
+        await page.WaitForTimeoutAsync(esRapido ? 0 : 1000);
+        await page.Keyboard.PressAsync("Enter");
+        await page.WaitForTimeoutAsync(esperaLarga);
+
+        Console.WriteLine("Seleccionando el primer producto...");
+        await page.WaitForSelectorAsync("article a, .product-block-top-main a, a.dpb-product-model-link", new PageWaitForSelectorOptions { State = WaitForSelectorState.Visible });
+        var primerProducto = page.Locator("article a, .product-block-top-main a, a.dpb-product-model-link").First;
+
+        string enlaceProducto = await primerProducto.GetAttributeAsync("href") ?? "";
+        if (!string.IsNullOrEmpty(enlaceProducto)) await page.GotoAsync(enlaceProducto.StartsWith("http") ? enlaceProducto : "https://www.decathlon.es" + enlaceProducto);
+        else await primerProducto.ClickAsync(new LocatorClickOptions { Force = true });
+
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await page.WaitForTimeoutAsync(esperaLarga);
+
+        string nombreProducto = busqueda;
+        try { nombreProducto = await page.Locator("h1").First.InnerTextAsync(); } catch { }
+
+        Console.WriteLine($"Añadiendo a la cesta: {nombreProducto}...");
+        try
+        {
+            var btnCarrito = page.Locator("button:has-text('Añadir a la cesta'), button.conversion-zone__purchase-action, button#add-to-cart-button").First;
+            await btnCarrito.ScrollIntoViewIfNeededAsync();
+            await btnCarrito.ClickAsync(new LocatorClickOptions { Force = true });
+            productosAñadidos.Add(nombreProducto);
+            await page.WaitForTimeoutAsync(esperaPaso);
+            Console.WriteLine("¡Producto añadido a la cesta!");
+
+            if (busqueda != productosABuscar[productosABuscar.Length - 1])
+            {
+                await page.GotoAsync("https://www.decathlon.es/es/");
+                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                await page.WaitForTimeoutAsync(esperaPaso);
+            }
+        }
+        catch { Console.WriteLine("Ocurrió un error al añadir al carrito."); }
+    }
+
+    Console.WriteLine("\nYendo a confirmar la cesta...");
+    await page.GotoAsync("https://www.decathlon.es/es/checkout/cart/");
+    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+    await page.WaitForTimeoutAsync(esperaLarga);
+    Console.WriteLine("¡Ya estamos en el carrito de Decathlon!");
+
+    Console.WriteLine("Intentando tramitar el pedido (Checkout)...");
+    try
+    {
+        var btnTramitar = page.Locator("button:has-text('Tramitar pedido'), button:has-text('Continuar'), a:has-text('Tramitar pedido')").First;
+        if (await btnTramitar.IsVisibleAsync())
+        {
+            await btnTramitar.ScrollIntoViewIfNeededAsync();
+            await btnTramitar.ClickAsync();
+            await page.WaitForTimeoutAsync(esperaLarga);
+
+            var emailInput = page.Locator("input[type='email'], input[name='email'], #email").First;
+            if (await emailInput.IsVisibleAsync())
+            {
+                await emailInput.FillAsync("test_bot_compra@ejemplo.com");
+                await page.WaitForTimeoutAsync(esRapido ? 100 : 1500);
+
+                var btnSiguienteEmail = page.Locator("button:has-text('Continúe'), button:has-text('Siguiente'), button[type='submit']").First;
+                if (await btnSiguienteEmail.IsVisibleAsync()) await btnSiguienteEmail.ClickAsync();
+                else await page.Keyboard.PressAsync("Enter");
+
+                await page.WaitForTimeoutAsync(esperaLarga);
+                Console.WriteLine("¡Llegamos al límite de registro/pago simulado!");
+
+                string escritorio = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string rutaCsv = System.IO.Path.Combine(escritorio, "compras_exitosas.csv");
+                if (!System.IO.File.Exists(rutaCsv)) System.IO.File.AppendAllText(rutaCsv, "Fecha;Tienda;Producto\n");
+                string nombresUnidos = string.Join(" + ", productosAñadidos);
+                System.IO.File.AppendAllText(rutaCsv, $"{DateTime.Now:dd/MM/yyyy HH:mm:ss};Decathlon;{nombresUnidos}\n");
+                Console.WriteLine($"\n[Excel] Compra guardada con éxito en el ESCRITORIO: {rutaCsv}");
+            }
+        }
+    }
+    catch { Console.WriteLine("No se pudo avanzar al checkout."); }
+
+    if (!esRapido) await page.WaitForTimeoutAsync(8000); 
+}
+else
+{
+    Console.WriteLine("Opción no válida.");
+}
+
+// Cerramos
+await browser.CloseAsync();
+
+Console.WriteLine("\nProceso terminado. Presiona cualquier tecla para salir...");
+Console.ReadKey();

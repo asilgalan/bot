@@ -1,0 +1,103 @@
+﻿using Microsoft.Playwright;
+using System;
+using System.Threading.Tasks;
+
+Console.WriteLine("Selecciona una opción:");
+Console.WriteLine("1. Buscar C# en Wikipedia y tomar captura");
+Console.WriteLine("2. Ir a PcComponentes y añadir algo al carrito (Lento)");
+string opcion = Console.ReadLine() ?? "1";
+
+// 1. Inicializamos Playwright
+using var playwright = await Playwright.CreateAsync();
+
+// 2. Lanzamos el navegador (Headless = false para ver el proceso)
+// Usamos SlowMo activado si elegimos la opción 2, lo cual ralentiza cada acción (clics, teclas) automáticamente para que el usuario pueda verlo paso a paso (sbs).
+await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+{
+    Headless = false,
+    SlowMo = opcion == "2" ? 1000 : 0
+});
+
+var page = await browser.NewPageAsync();
+
+if (opcion == "1")
+{
+    // 3. Vamos a la página principal de Wikipedia
+    Console.WriteLine("Navegando a Wikipedia...");
+    await page.GotoAsync("https://es.wikipedia.org/");
+
+    // 4. Buscamos el cuadro de búsqueda e ingresamos "C#"
+    // El selector 'input[name="search"]' es el estándar de Wikipedia
+    await page.FillAsync("input[name=\"search\"]", "C Sharp");
+
+    // 5. Presionamos Enter para buscar
+    await page.Keyboard.PressAsync("Enter");
+
+    // 6. Esperamos a que el contenido principal de la página de C# esté visible
+    await page.WaitForSelectorAsync("#firstHeading");
+
+    Console.WriteLine($"Página cargada: {await page.TitleAsync()}");
+
+    // 7. Tomamos la captura de pantalla
+    string rutaCaptura = "captura_csharp.png";
+    await page.ScreenshotAsync(new PageScreenshotOptions
+    {
+        Path = rutaCaptura,
+        FullPage = true // Captura toda la página, no solo lo que se ve
+    });
+
+    Console.WriteLine($"Captura guardada como: {rutaCaptura}");
+}
+else if (opcion == "2")
+{
+    // Vamos a la página y hacemos pausas explícitas con WaitForTimeoutAsync para que la experiencia sea aún más lenta.
+    Console.WriteLine("Navegando a PcComponentes...");
+    await page.GotoAsync("https://www.pccomponentes.com/");
+    await page.WaitForTimeoutAsync(2000);
+
+    // Intentar gestionar el diálogo de cookies si aparece
+    try
+    {
+        var btnCookies = page.Locator("button:has-text('Rechazar'), button:has-text('Aceptar'), #cookiesAcceptAll").First;
+        if (await btnCookies.IsVisibleAsync())
+        {
+            await btnCookies.ClickAsync();
+        }
+    }
+    catch { /* Ignoramos el error si no están las cookies bloqueando */ }
+
+    // Rellenamos el cuadro de búsqueda (usamos selectores genéricos de búsquedas comunes)
+    Console.WriteLine("Escribiendo búsqueda...");
+    await page.Locator("header input[type='search'], input[name='query'], input[type='text']").First.FillAsync("raton logitech");
+    await page.WaitForTimeoutAsync(1500);
+    await page.Keyboard.PressAsync("Enter");
+
+    Console.WriteLine("Seleccionando el primer producto...");
+    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+    await page.WaitForTimeoutAsync(2000);
+
+    // Buscamos un enlace del primer producto
+    var primerProducto = page.Locator("a[class*='product-card'], article a").First;
+    await primerProducto.ClickAsync();
+
+    Console.WriteLine("Añadiendo al carrito, espera un momento...");
+    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+    await page.WaitForTimeoutAsync(2000);
+
+    // Click al botón de añadir al carrito
+    var btnCarrito = page.Locator("button:has-text('Añadir al carrito'), button:has-text('Comprar'), button[id*='add-to-cart']").First;
+    await btnCarrito.ClickAsync();
+
+    Console.WriteLine("¡Producto añadido al carrito!");
+    await page.WaitForTimeoutAsync(3000); // Mostramos el resultado en pantalla un rato
+}
+else
+{
+    Console.WriteLine("Opción no válida.");
+}
+
+// Cerramos
+await browser.CloseAsync();
+
+Console.WriteLine("\nProceso terminado. Presiona cualquier tecla para salir...");
+Console.ReadKey();

@@ -1,0 +1,88 @@
+﻿using Microsoft.Playwright;
+using System;
+using System.Threading.Tasks;
+
+Console.WriteLine("Selecciona una opción:");
+Console.WriteLine("1. Buscar C# en Wikipedia y tomar captura");
+Console.WriteLine("2. Ir a SauceDemo (Tienda de pruebas) y añadir algo al carrito (Lento)");
+string opcion = Console.ReadLine() ?? "1";
+
+// 1. Inicializamos Playwright
+using var playwright = await Playwright.CreateAsync();
+
+// 2. Lanzamos el navegador (Headless = false para ver el proceso)
+// Usamos SlowMo activado si elegimos la opción 2, lo cual ralentiza cada acción (clics, teclas) automáticamente para que el usuario pueda verlo paso a paso (sbs).
+await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+{
+    Headless = false,
+    SlowMo = opcion == "2" ? 1000 : 0
+});
+
+var page = await browser.NewPageAsync();
+
+if (opcion == "1")
+{
+    // 3. Vamos a la página principal de Wikipedia
+    Console.WriteLine("Navegando a Wikipedia...");
+    await page.GotoAsync("https://es.wikipedia.org/");
+
+    // 4. Buscamos el cuadro de búsqueda e ingresamos "C#"
+    // El selector 'input[name="search"]' es el estándar de Wikipedia
+    await page.FillAsync("input[name=\"search\"]", "C Sharp");
+
+    // 5. Presionamos Enter para buscar
+    await page.Keyboard.PressAsync("Enter");
+
+    // 6. Esperamos a que el contenido principal de la página de C# esté visible
+    await page.WaitForSelectorAsync("#firstHeading");
+
+    Console.WriteLine($"Página cargada: {await page.TitleAsync()}");
+
+    // 7. Tomamos la captura de pantalla
+    string rutaCaptura = "captura_csharp.png";
+    await page.ScreenshotAsync(new PageScreenshotOptions
+    {
+        Path = rutaCaptura,
+        FullPage = true // Captura toda la página, no solo lo que se ve
+    });
+
+    Console.WriteLine($"Captura guardada como: {rutaCaptura}");
+}
+else if (opcion == "2")
+{
+    // Vamos a una página de pruebas de e-commerce que siempre funciona y es perfecta para bots.
+    Console.WriteLine("Navegando a SauceDemo (Tienda de pruebas)...");
+    await page.GotoAsync("https://www.saucedemo.com/");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Iniciando sesión...");
+    await page.FillAsync("#user-name", "standard_user");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.FillAsync("#password", "secret_sauce");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.ClickAsync("#login-button");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Añadiendo el primer producto al carrito...");
+    // El botón genérico ".btn_inventory" añade un producto al carrito
+    await page.Locator(".btn_inventory").First.ClickAsync();
+
+    Console.WriteLine("¡Producto añadido al carrito!");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Yendo al carrito para comprobarlo...");
+    await page.ClickAsync(".shopping_cart_link");
+    await page.WaitForTimeoutAsync(3000); // Mostramos el resultado en pantalla un rato
+}
+else
+{
+    Console.WriteLine("Opción no válida.");
+}
+
+// Cerramos
+await browser.CloseAsync();
+
+Console.WriteLine("\nProceso terminado. Presiona cualquier tecla para salir...");
+Console.ReadKey();

@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "v/8IvgZ+cKI=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\asilg\\source\\repos\\Bot\\Bot\\Bot.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\asilg\\.nuget\\packages\\microsoft.bcl.asyncinterfaces\\6.0.0\\microsoft.bcl.asyncinterfaces.6.0.0.nupkg.sha512",
+    "C:\\Users\\asilg\\.nuget\\packages\\microsoft.playwright\\1.58.0\\microsoft.playwright.1.58.0.nupkg.sha512",
+    "C:\\Users\\asilg\\.nuget\\packages\\system.componentmodel.annotations\\5.0.0\\system.componentmodel.annotations.5.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

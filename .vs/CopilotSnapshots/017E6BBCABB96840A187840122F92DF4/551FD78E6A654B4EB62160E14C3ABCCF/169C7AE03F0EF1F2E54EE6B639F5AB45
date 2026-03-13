@@ -1,0 +1,177 @@
+﻿using Microsoft.Playwright;
+using System;
+using System.Threading.Tasks;
+
+Console.WriteLine("Selecciona una opción:");
+Console.WriteLine("1. Buscar C# en Wikipedia y tomar captura");
+Console.WriteLine("2. Ir a SauceDemo (Tienda de pruebas) y añadir algo al carrito (Lento)");
+Console.WriteLine("3. Ir a Nike y añadir un producto al carrito (Lento)");
+string opcion = Console.ReadLine() ?? "1";
+
+// 1. Inicializamos Playwright
+using var playwright = await Playwright.CreateAsync();
+
+// 2. Lanzamos el navegador (Headless = false para ver el proceso)
+// Usamos SlowMo activado si elegimos la opción 2, lo cual ralentiza cada acción (clics, teclas) automáticamente para que el usuario pueda verlo paso a paso (sbs).
+await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+{
+    Headless = false,
+    SlowMo = (opcion == "2" || opcion == "3") ? 1000 : 0
+});
+
+var page = await browser.NewPageAsync();
+
+if (opcion == "1")
+{
+    // 3. Vamos a la página principal de Wikipedia
+    Console.WriteLine("Navegando a Wikipedia...");
+    await page.GotoAsync("https://es.wikipedia.org/");
+
+    // 4. Buscamos el cuadro de búsqueda e ingresamos "C#"
+    // El selector 'input[name="search"]' es el estándar de Wikipedia
+    await page.FillAsync("input[name=\"search\"]", "C Sharp");
+
+    // 5. Presionamos Enter para buscar
+    await page.Keyboard.PressAsync("Enter");
+
+    // 6. Esperamos a que el contenido principal de la página de C# esté visible
+    await page.WaitForSelectorAsync("#firstHeading");
+
+    Console.WriteLine($"Página cargada: {await page.TitleAsync()}");
+
+    // 7. Tomamos la captura de pantalla
+    string rutaCaptura = "captura_csharp.png";
+    await page.ScreenshotAsync(new PageScreenshotOptions
+    {
+        Path = rutaCaptura,
+        FullPage = true // Captura toda la página, no solo lo que se ve
+    });
+
+    Console.WriteLine($"Captura guardada como: {rutaCaptura}");
+}
+else if (opcion == "2")
+{
+    // Vamos a una página de pruebas de e-commerce que siempre funciona y es perfecta para bots.
+    Console.WriteLine("Navegando a SauceDemo (Tienda de pruebas)...");
+    await page.GotoAsync("https://www.saucedemo.com/");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Iniciando sesión...");
+    await page.FillAsync("#user-name", "standard_user");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.FillAsync("#password", "secret_sauce");
+    await page.WaitForTimeoutAsync(1000);
+
+    await page.ClickAsync("#login-button");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Añadiendo el primer producto al carrito...");
+    // El botón genérico ".btn_inventory" añade un producto al carrito
+    await page.Locator(".btn_inventory").First.ClickAsync();
+
+    Console.WriteLine("¡Producto añadido al carrito!");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Yendo al carrito para comprobarlo...");
+    await page.ClickAsync(".shopping_cart_link");
+    await page.WaitForTimeoutAsync(3000); // Mostramos el resultado en pantalla un rato
+}
+else if (opcion == "3")
+{
+    Console.WriteLine("Navegando a Nike...");
+    await page.GotoAsync("https://www.nike.com/es/");
+    await page.WaitForTimeoutAsync(2000);
+
+    Console.WriteLine("Aceptando cookies y políticas...");
+    try
+    {
+        var btnCookies = page.Locator("button:has-text('Aceptar todas'), button:has-text('Aceptar'), #hf_cookie_text_cookieAccept").First;
+        if (await btnCookies.IsVisibleAsync())
+        {
+            await btnCookies.ClickAsync();
+        }
+    }
+    catch { /* Ignoramos el error si no están las cookies bloqueando */ }
+    await page.WaitForTimeoutAsync(1000);
+
+    Console.WriteLine("Buscando un producto...");
+    // Intentamos hacer clic en el botón de búsqueda para que se despliegue si es necesario
+    var btnBuscar = page.Locator("button[aria-label='Buscar'], button[data-testid='search-button']").First;
+    if (await btnBuscar.IsVisibleAsync()) 
+    {
+        await btnBuscar.ClickAsync();
+        await page.WaitForTimeoutAsync(1000);
+    }
+
+    var searchInput = page.Locator("#VisualSearchInput, input[type='search'], input[name='search']").First;
+    await searchInput.FillAsync("zapatillas");
+    await page.Keyboard.PressAsync("Enter");
+    await page.WaitForTimeoutAsync(3000);
+
+    Console.WriteLine("Seleccionando el primer producto para ver sus detalles...");
+    // Esperamos a que los resultados de búsqueda se rendericen
+    await page.WaitForSelectorAsync("a.product-card__link-overlay", new PageWaitForSelectorOptions { State = WaitForSelectorState.Visible });
+
+    var primerProducto = page.Locator("a.product-card__link-overlay").First;
+
+    // Extraemos el enlace y navegamos directamente para evitar problemas de clics interceptados o scroll infinito
+    string enlaceProducto = await primerProducto.GetAttributeAsync("href") ?? "";
+    if (!string.IsNullOrEmpty(enlaceProducto))
+    {
+        // En caso de que el enlace sea relativo
+        if (!enlaceProducto.StartsWith("http"))
+        {
+            enlaceProducto = "https://www.nike.com" + enlaceProducto;
+        }
+        await page.GotoAsync(enlaceProducto);
+    }
+    else
+    {
+        // Alternativa si no encontramos el href
+        await primerProducto.ClickAsync(new LocatorClickOptions { Force = true });
+    }
+
+    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+    await page.WaitForTimeoutAsync(3000);
+
+    Console.WriteLine("Intentando seleccionar una talla...");
+    try
+    {
+        // Hacemos scroll por si el selector de talla y botón de comprar están más abajo en la página
+        await page.EvaluateAsync("window.scrollBy(0, 500)");
+        await page.WaitForTimeoutAsync(1000);
+
+        // En Nike, los botones de talla suelen estar en un contenedor de cuadrícula o ser labels.
+        var talla = page.Locator("label[for^='skuAndSize__']:not([disabled]), div[role='radiogroup'] button:not([disabled]), div[data-testid='size-grid'] button:not([disabled])").First;
+        if (await talla.IsVisibleAsync())
+        {
+            await talla.ClickAsync(new LocatorClickOptions { Force = true });
+        }
+    }
+    catch { Console.WriteLine("No se encontró cuadro de talla o no era necesario."); }
+    await page.WaitForTimeoutAsync(1500);
+
+    Console.WriteLine("Añadiendo a la cesta desde los detalles del producto...");
+    try
+    {
+        var btnCarrito = page.Locator("button[data-testid='add-to-cart'], button:has-text('Añadir a la cesta')").First;
+        // Nos aseguramos de que el botón está visible en la pantalla
+        await btnCarrito.ScrollIntoViewIfNeededAsync();
+        await btnCarrito.ClickAsync(new LocatorClickOptions { Force = true });
+    }
+    catch { Console.WriteLine("No se pudo añadir a la cesta. Puede que falte seleccionar algún detalle o esté agotado."); }
+
+    Console.WriteLine("¡Producto añadido a la cesta!");
+    await page.WaitForTimeoutAsync(5000); // Dejamos tiempo al usuario para confirmar visualmente
+}
+else
+{
+    Console.WriteLine("Opción no válida.");
+}
+
+// Cerramos
+await browser.CloseAsync();
+
+Console.WriteLine("\nProceso terminado. Presiona cualquier tecla para salir...");
+Console.ReadKey();

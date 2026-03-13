@@ -1,0 +1,46 @@
+﻿using Microsoft.Playwright;
+using System;
+using System.Threading.Tasks;
+
+// 1. Inicializamos Playwright
+using var playwright = await Playwright.CreateAsync();
+
+// 2. Lanzamos el navegador (Headless = false para ver el proceso)
+await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+{
+    Headless = false
+});
+
+var page = await browser.NewPageAsync();
+
+// 3. Vamos a la página principal de Wikipedia
+Console.WriteLine("Navegando a Wikipedia...");
+await page.GotoAsync("https://es.wikipedia.org/");
+
+// 4. Buscamos el cuadro de búsqueda e ingresamos "C#"
+// El selector 'input[name="search"]' es el estándar de Wikipedia
+await page.FillAsync("input[name=\"search\"]", "C Sharp");
+
+// 5. Presionamos Enter para buscar
+await page.Keyboard.PressAsync("Enter");
+
+// 6. Esperamos a que el contenido principal de la página de C# esté visible
+await page.WaitForSelectorAsync("#firstHeading");
+
+Console.WriteLine($"Página cargada: {await page.TitleAsync()}");
+
+// 7. Tomamos la captura de pantalla
+string rutaCaptura = "captura_csharp.png";
+await page.ScreenshotAsync(new PageScreenshotOptions
+{
+    Path = rutaCaptura,
+    FullPage = true // Captura toda la página, no solo lo que se ve
+});
+
+Console.WriteLine($"Captura guardada como: {rutaCaptura}");
+
+// Cerramos
+await browser.CloseAsync();
+
+Console.WriteLine("\nProceso terminado. Presiona cualquier tecla para salir...");
+Console.ReadKey();
